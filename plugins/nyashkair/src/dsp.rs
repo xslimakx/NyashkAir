@@ -1,14 +1,16 @@
 //! Air: dynamic presence + brilliance with harmonic excitation, in parallel with the dry signal.
 use nyashk_common::dsp::*;
 
-pub const MID_HP: f32 = 2200.0;
-pub const MID_LP: f32 = 7000.0;
+// Presence band = first-order HP x first-order LP. Both have a non-negative real part, so adding
+// the band to the dry signal can only lift, never dip.
+pub const MID_HP: f32 = 3500.0;
+pub const MID_LP: f32 = 9000.0;
 pub const MID_HARM_HP: f32 = 4200.0;
-pub const HIGH_HP: f32 = 7500.0;
+pub const HIGH_HP: f32 = 9000.0; // first order: its real part is never negative, so the boost can't dip
 pub const HIGH_HARM_HP: f32 = 11000.0;
 
 pub struct Coefs {
-    pub mid_hp: [Coef; 2],
+    pub mid_hp: Coef,
     pub mid_lp: Coef,
     pub mid_h: Coef,
     pub high_hp: Coef,
@@ -19,10 +21,10 @@ impl Coefs {
     pub fn new(fs: f32) -> Self {
         let q = butter_q::<2>();
         Self {
-            mid_hp: [Coef::highpass(fs, MID_HP, q[0]), Coef::highpass(fs, MID_HP, q[1])],
-            mid_lp: Coef::lowpass(fs, MID_LP, 0.7071),
+            mid_hp: Coef::highpass1(fs, MID_HP),
+            mid_lp: Coef::lowpass1(fs, MID_LP),
             mid_h: Coef::highpass(fs, MID_HARM_HP, 0.7071),
-            high_hp: Coef::highpass(fs, HIGH_HP, 0.7071),
+            high_hp: Coef::highpass1(fs, HIGH_HP),
             high_h: [Coef::highpass(fs, HIGH_HARM_HP, q[0]), Coef::highpass(fs, HIGH_HARM_HP, q[1])],
         }
     }
@@ -30,7 +32,7 @@ impl Coefs {
 
 #[derive(Clone, Default)]
 struct Ch {
-    mid_hp: Chain<2>,
+    mid_hp: Bq,
     mid_lp: Bq,
     mid_hh: Bq,
     high_hp: Bq,
@@ -134,11 +136,11 @@ impl Air {
         let mut dry_e = 0.0f32;
         let mut out_pk = 0.0f32;
         for i in 0..n {
-            let air_m = (mid_bp[i] * 0.9 + mid_h[i]) * dm * mid * 2.2;
-            let air_h = (high_hp[i] * 0.8 + high_h[i]) * dh * high * 2.6;
+            let air_m = (mid_bp[i] * 0.9 + mid_h[i]) * dm * mid * 1.6;
+            let air_h = (high_hp[i] * 0.8 + high_h[i]) * dh * high * 3.4;
             let air = (air_m + air_h) * pw;
             add_e += air * air;
-            dry_e += x[i] * x[i];
+            dry_e += mid_bp[i] * mid_bp[i] + high_hp[i] * high_hp[i]; // the highs that are already there
             let y = (x[i] + air) * trim;
             x[i] = y;
             out_pk = out_pk.max(y.abs());
@@ -148,24 +150,23 @@ impl Air {
         self.out_peak = out_pk;
         self.added = self.added * 0.995 + add_e * 0.005;
         self.dry = self.dry * 0.995 + dry_e * 0.005;
-        self.added_db = 10.0 * ((self.added + 1e-12) / (self.dry + 1e-12)).log10();
+        self.added_db = if self.dry < 1e-9 { -90.0 } else { 10.0 * ((self.added + 1e-12) / (self.dry + 1e-12)).log10() };
     }
 }
 
 /// Static (linear) part of the air curve for the display: |1 + a_m * BP(f) + a_h * HP(f)| in dB.
 pub fn curve_db(fs: f32, mid: f32, high: f32, f: f32) -> f32 {
     let c = Coefs::new(fs);
-    let (h0r, h0i) = c.mid_hp[0].response(fs, f);
-    let (h1r, h1i) = c.mid_hp[1].response(fs, f);
-    let (hr, hi) = (h0r * h1r - h0i * h1i, h0r * h1i + h0i * h1r);
-    let (lr, li) = c.mid_lp.response(fs, f);
-    let (bre, bim) = (hr * lr - hi * li, hr * li + hi * lr);
+    let (h0r, h0i) = c.mid_hp.response(fs, f);
+    let (l0r, l0i) = c.mid_lp.response(fs, f);
+    let (bre, bim) = (h0r * l0r - h0i * l0i, h0r * l0i + h0i * l0r);
     let (xr, xi) = c.high_hp.response(fs, f);
-    let (mh_r, mh_i) = c.mid_h.response(fs, f);
+    let (mh_r, _mh_i) = c.mid_h.response(fs, f);
+    let mh_mag = (mh_r * mh_r + _mh_i * _mh_i).sqrt();
     // harmonic contribution is not linear; approximate it in the picture by its share of the band
-    let mr = mid * 2.2 * 0.9;
-    let hrr = high * 2.6 * 0.8;
-    let re = 1.0 + mr * bre + hrr * xr + mid * 0.35 * mh_r * bre;
-    let im = mr * bim + hrr * xi + mid * 0.35 * mh_i * bre;
+    let mr = mid * 1.6 * 0.9;
+    let hrr = high * 3.4 * 0.8;
+    let re = 1.0 + mr * bre + hrr * xr + mid * 0.35 * mh_mag * bre.abs();
+    let im = mr * bim + hrr * xi;
     10.0 * (re * re + im * im).max(1e-9).log10()
 }

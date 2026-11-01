@@ -49,7 +49,7 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                 // ---- display
                 let dp = rect(14.0, 70.0, BASE_W - 28.0, 168.0);
                 panel(ui, dp);
-                let g = Rect::from_min_max(Pos2::new(dp.left() + 40.0, dp.top() + 14.0), Pos2::new(dp.right() - 130.0, dp.bottom() - 26.0));
+                let g = Rect::from_min_max(Pos2::new(dp.left() + 40.0, dp.top() + 14.0), Pos2::new(dp.right() - 170.0, dp.bottom() - 26.0));
                 let painter = ui.painter().clone();
                 painter.rect_filled(g, 4.0, Color32::from_rgb(0x07, 0x07, 0x07));
                 let (f_lo, f_hi) = (1000.0f32, 20000.0f32);
@@ -72,15 +72,12 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                         Pos2::new(fx(f), dy(d))
                     })
                     .collect();
-                let mut fill = pts.clone();
-                fill.push(Pos2::new(g.right(), dy(0.0)));
-                fill.push(Pos2::new(g.left(), dy(0.0)));
-                painter.with_clip_rect(g).add(egui::Shape::convex_polygon(fill, Color32::from_white_alpha(18), Stroke::NONE));
+                fill_under(&painter.with_clip_rect(g), &pts, dy(0.0), Color32::from_white_alpha(18));
                 painter.with_clip_rect(g).add(egui::Shape::line(pts, PathStroke::new(2.0, WHITE)));
                 painter.text(Pos2::new(g.left() + 8.0, g.top() + 10.0), Align2::LEFT_CENTER, "AIR CURVE", mono(9.5), DIM);
 
                 // meters
-                let mx = dp.right() - 112.0;
+                let mx = dp.right() - 150.0;
                 let bar_t = dp.top() + 18.0;
                 let bar_h = dp.height() - 52.0;
                 for (k, (name, lvl, hold)) in [("IN", st.in_pk, st.in_hold), ("OUT", st.out_pk, st.out_hold)].into_iter().enumerate() {
@@ -90,6 +87,8 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                 }
                 let added = Meters::get(&meters.added_db);
                 painter.text(Pos2::new(dp.right() - 22.0, bar_t + 8.0), Align2::RIGHT_CENTER, "ADDED", mono(9.0), DIM);
+                painter.text(Pos2::new(dp.right() - 22.0, bar_t + 44.0), Align2::RIGHT_CENTER, "vs existing", mono(9.0), DIM);
+                painter.text(Pos2::new(dp.right() - 22.0, bar_t + 56.0), Align2::RIGHT_CENTER, "highs", mono(9.0), DIM);
                 painter.text(Pos2::new(dp.right() - 22.0, bar_t + 26.0), Align2::RIGHT_CENTER, if on && added > -60.0 { format!("{:+.1} dB", added) } else { "-- dB".into() }, mono(11.0), WHITE);
 
                 // ---- knobs

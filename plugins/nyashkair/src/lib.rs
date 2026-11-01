@@ -104,6 +104,7 @@ impl Plugin for NyashkAir {
     }
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, _c: &mut impl ProcessContext<Self>) -> ProcessStatus {
+        nyashk_common::demo::sanitize(buffer);
         let Some(air) = self.air.as_mut() else { return ProcessStatus::Normal };
         let p = &self.params;
         let (mut ipk, mut opk) = (0.0f32, 0.0f32);
