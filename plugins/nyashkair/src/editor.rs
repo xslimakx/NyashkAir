@@ -96,8 +96,8 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                 panel(ui, kp);
                 let link = p.link.value();
                 let cell = |cx: f32| Rect::from_min_size(Pos2::new(o.x + cx - 90.0, kp.top() + 6.0), Vec2::new(180.0, 150.0));
-                let a = knob_r(ui, setter, &p.mid, "MID AIR", cell(150.0), "Presence: 2 to 8 kHz. Adds a gentle lift plus fresh harmonics, reduced automatically on loud passages.", false, 46.0);
-                let b = knob_r(ui, setter, &p.high, "HIGH AIR", cell(BASE_W - 150.0 - 80.0), "Brilliance above 8 kHz. Adds a silky lift plus new high harmonics (like opening a window on the top end).", false, 46.0);
+                let a = knob_r(ui, setter, &p.mid, "MID AIR", cell(135.0), "Presence: 2 to 8 kHz. Adds a gentle lift plus fresh harmonics, reduced automatically on loud passages.", false, 46.0);
+                let b = knob_r(ui, setter, &p.high, "HIGH AIR", cell(390.0), "Brilliance above 8 kHz. Adds a silky lift plus new high harmonics (like opening a window on the top end).", false, 46.0);
                 if link {
                     if a.delta != 0.0 {
                         set_norm(setter, &p.high, p.high.unmodulated_normalized_value() + a.delta);
@@ -105,7 +105,7 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                         set_norm(setter, &p.mid, p.mid.unmodulated_normalized_value() + b.delta);
                     }
                 }
-                if pill_tip(ui, Rect::from_center_size(Pos2::new(o.x + (150.0 + BASE_W - 230.0) / 2.0, kp.top() + 54.0), Vec2::new(46.0, 26.0)), "LINK", link, "Link the two knobs: moving one moves the other by the same amount.") {
+                if pill_tip(ui, Rect::from_center_size(Pos2::new(o.x + (135.0 + 390.0) / 2.0, kp.top() + 54.0), Vec2::new(46.0, 26.0)), "LINK", link, "Link the two knobs: moving one moves the other by the same amount.") {
                     set_b(setter, &p.link, !link);
                 }
                 knob_r(ui, setter, &p.trim, "TRIM", Rect::from_min_size(Pos2::new(o.x + BASE_W - 14.0 - 110.0, kp.top() + 28.0), Vec2::new(100.0, 120.0)), "Output trim in dB.", true, 26.0);
