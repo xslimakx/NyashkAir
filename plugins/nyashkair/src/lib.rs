@@ -13,11 +13,22 @@ pub struct Meters {
     pub in_db: AtomicU32,
     pub out_db: AtomicU32,
     pub added_db: AtomicU32,
+    pub fs: AtomicU32,
+    /// live input / output (mono) for the spectrum display
+    pub tap_in: nyashk_common::tap::Tap,
+    pub tap_out: nyashk_common::tap::Tap,
 }
 impl Meters {
     fn new() -> Self {
         let m90 = (-90f32).to_bits();
-        Self { in_db: AtomicU32::new(m90), out_db: AtomicU32::new(m90), added_db: AtomicU32::new(m90) }
+        Self {
+            in_db: AtomicU32::new(m90),
+            out_db: AtomicU32::new(m90),
+            added_db: AtomicU32::new(m90),
+            fs: AtomicU32::new(48000f32.to_bits()),
+            tap_in: nyashk_common::tap::Tap::new(8192),
+            tap_out: nyashk_common::tap::Tap::new(8192),
+        }
     }
     pub fn get(a: &AtomicU32) -> f32 {
         f32::from_bits(a.load(Ordering::Relaxed))
@@ -94,6 +105,7 @@ impl Plugin for NyashkAir {
 
     fn initialize(&mut self, _l: &AudioIOLayout, config: &BufferConfig, _c: &mut impl InitContext<Self>) -> bool {
         self.air = Some(dsp::Air::new(config.sample_rate));
+        self.meters.fs.store(config.sample_rate.to_bits(), Ordering::Relaxed);
         true
     }
 
@@ -104,6 +116,7 @@ impl Plugin for NyashkAir {
     }
 
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, _c: &mut impl ProcessContext<Self>) -> ProcessStatus {
+        nyashk_common::demo::fill(buffer, f32::from_bits(self.meters.fs.load(Ordering::Relaxed)));
         nyashk_common::demo::sanitize(buffer);
         let Some(air) = self.air.as_mut() else { return ProcessStatus::Normal };
         let p = &self.params;
@@ -120,7 +133,9 @@ impl Plugin for NyashkAir {
             for (i, s) in frame.iter_mut().enumerate().take(n) {
                 x[i] = *s;
             }
+            self.meters.tap_in.push(if n == 2 { 0.5 * (x[0] + x[1]) } else { x[0] });
             air.process(&dp, &mut x, n);
+            self.meters.tap_out.push(if n == 2 { 0.5 * (x[0] + x[1]) } else { x[0] });
             ipk = ipk.max(air.in_peak);
             opk = opk.max(air.out_peak);
             for (i, s) in frame.iter_mut().enumerate().take(n) {

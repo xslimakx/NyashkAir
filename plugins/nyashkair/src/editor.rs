@@ -4,6 +4,7 @@ use nih_plug_egui::{
     create_egui_editor,
     egui::{self, epaint::PathStroke, Align2, Color32, Pos2, Rect, Stroke, Vec2},
 };
+use nyashk_common::analyzer::{draw_spectrum, Spectrum};
 use nyashk_common::ui::*;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,6 +15,8 @@ const BASE_W: f32 = 640.0;
 const BASE_H: f32 = 430.0;
 
 struct Gui {
+    spec_in: Spectrum,
+    spec_out: Spectrum,
     in_pk: f32,
     out_pk: f32,
     in_hold: f32,
@@ -25,7 +28,7 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
     let size_state = editor_state.clone();
     create_egui_editor(
         editor_state,
-        Gui { in_pk: -90.0, out_pk: -90.0, in_hold: -90.0, out_hold: -90.0 },
+        Gui { spec_in: Spectrum::new(4096), spec_out: Spectrum::new(4096), in_pk: -90.0, out_pk: -90.0, in_hold: -90.0, out_hold: -90.0 },
         |ctx, _| apply_theme(ctx),
         move |ctx, setter, st| {
             ctx.request_repaint_after(Duration::from_millis(33));
@@ -34,6 +37,8 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
             st.in_pk = fall(st.in_pk, Meters::get(&meters.in_db));
             st.out_pk = fall(st.out_pk, Meters::get(&meters.out_db));
             st.in_hold = st.in_hold.max(st.in_pk) - 0.12;
+            st.spec_in.update(&meters.tap_in);
+            st.spec_out.update(&meters.tap_out);
             st.out_hold = st.out_hold.max(st.out_pk) - 0.12;
 
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(BG)).show(ctx, |ui| {
@@ -64,6 +69,14 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                     painter.vline(fx(f), g.top()..=g.bottom(), Stroke::new(1.0, LINE));
                     painter.text(Pos2::new(fx(f), g.bottom() + 11.0), Align2::CENTER_CENTER, if f >= 1000.0 { format!("{}k", f / 1000.0) } else { format!("{}", f) }, mono(9.5), DIM);
                 }
+                // live spectrum: input as a thin line, output filled (the difference is the added air)
+                let fs = f32::from_bits(meters.fs.load(std::sync::atomic::Ordering::Relaxed)).clamp(8000.0, 384000.0);
+                let sy = |d: f32| g.bottom() - g.height() * ((d + 84.0) / 84.0).clamp(-0.05, 1.05);
+                let f_top = f_hi.min(fs * 0.49);
+                let out_pts = st.spec_out.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
+                draw_spectrum(&painter, g, &out_pts, Color32::from_gray(24), Color32::from_gray(80));
+                let in_pts = st.spec_in.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
+                painter.with_clip_rect(g).add(egui::Shape::line(in_pts, PathStroke::new(1.0, Color32::from_rgb(0x5a, 0x5a, 0x5a))));
                 let (m, h) = (p.mid.value() / 100.0, p.high.value() / 100.0);
                 let pts: Vec<Pos2> = (0..=160)
                     .map(|i| {
@@ -72,9 +85,9 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                         Pos2::new(fx(f), dy(d))
                     })
                     .collect();
-                fill_under(&painter.with_clip_rect(g), &pts, dy(0.0), Color32::from_white_alpha(18));
+                fill_under(&painter.with_clip_rect(g), &pts, dy(0.0), Color32::from_white_alpha(12));
                 painter.with_clip_rect(g).add(egui::Shape::line(pts, PathStroke::new(2.0, WHITE)));
-                painter.text(Pos2::new(g.left() + 8.0, g.top() + 10.0), Align2::LEFT_CENTER, "AIR CURVE", mono(9.5), DIM);
+                painter.text(Pos2::new(g.left() + 8.0, g.top() + 10.0), Align2::LEFT_CENTER, "AIR CURVE  ·  SPECTRUM IN / OUT", mono(9.5), DIM);
 
                 // meters
                 let mx = dp.right() - 150.0;
