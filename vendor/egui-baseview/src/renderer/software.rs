@@ -16,6 +16,65 @@ struct Tex {
     w: usize,
     h: usize,
     px: Vec<Color32>,
+    /// Half-size copies (box filtered, premultiplied) for drawing images scaled down:
+    /// without them a 240 px knob drawn at 76 px came out grainy and jagged.
+    mips: Vec<Tex>,
+}
+
+impl Tex {
+    fn new(w: usize, h: usize, px: Vec<Color32>, with_mips: bool) -> Tex {
+        let mut t = Tex { w, h, px, mips: Vec::new() };
+        if with_mips {
+            t.build_mips();
+        }
+        t
+    }
+
+    fn build_mips(&mut self) {
+        self.mips.clear();
+        let (mut w, mut h) = (self.w, self.h);
+        let mut src: &[Color32] = &self.px;
+        let mut out: Vec<Tex> = Vec::new();
+        while w > 1 || h > 1 {
+            let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+            let mut px = Vec::with_capacity(nw * nh);
+            for y in 0..nh {
+                for x in 0..nw {
+                    let mut acc = [0u32; 4];
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let sx = (2 * x + dx).min(w - 1);
+                        let sy = (2 * y + dy).min(h - 1);
+                        let c = src[sy * w + sx].to_array();
+                        for i in 0..4 {
+                            acc[i] += c[i] as u32;
+                        }
+                    }
+                    px.push(Color32::from_rgba_premultiplied(
+                        ((acc[0] + 2) / 4) as u8, ((acc[1] + 2) / 4) as u8, ((acc[2] + 2) / 4) as u8, ((acc[3] + 2) / 4) as u8,
+                    ));
+                }
+            }
+            out.push(Tex { w: nw, h: nh, px, mips: Vec::new() });
+            w = nw;
+            h = nh;
+            src = &out.last().unwrap().px;
+            if nw <= 4 && nh <= 4 {
+                break;
+            }
+        }
+        self.mips = out;
+    }
+
+    /// The level to sample when one screen pixel covers `rho` texels.
+    fn level(&self, rho: f32) -> &Tex {
+        // tiny tolerance so an exact 2x / 4x reduction picks its own level despite rounding
+        let rho = rho * 1.001;
+        if !(rho >= 2.0) || self.mips.is_empty() {
+            return self;
+        }
+        let l = (rho.log2().floor() as usize).min(self.mips.len());
+        &self.mips[l - 1]
+    }
 }
 
 pub struct Renderer {
@@ -44,32 +103,17 @@ impl Renderer {
         8192
     }
 
-    pub fn render(
-        &mut self,
-        window: &Window,
-        bg_color: egui::Rgba,
-        physical_size: PhySize,
-        pixels_per_point: f32,
-        egui_ctx: &mut egui::Context,
-        full_output: &mut FullOutput,
-    ) {
-        let (w, h) = (physical_size.width, physical_size.height);
-        if w == 0 || h == 0 {
-            return;
-        }
-        let shapes = std::mem::take(&mut full_output.shapes);
-        let delta = &mut full_output.textures_delta;
-
-        let mut changed = self.force;
-        for (id, d) in &delta.set {
-            changed = true;
-            let (iw, ih, pixels): (usize, usize, Vec<Color32>) = match &d.image {
-                ImageData::Color(img) => (img.size[0], img.size[1], img.pixels.clone()),
-                ImageData::Font(f) => (f.size[0], f.size[1], f.srgba_pixels(None).collect()),
+    /// Take new / updated textures. Returns true if anything changed.
+    pub fn apply_textures(&mut self, set: &[(TextureId, egui::epaint::ImageDelta)]) -> bool {
+        for (id, d) in set {
+            let (iw, ih, pixels, is_image): (usize, usize, Vec<Color32>, bool) = match &d.image {
+                ImageData::Color(img) => (img.size[0], img.size[1], img.pixels.clone(), true),
+                ImageData::Font(f) => (f.size[0], f.size[1], f.srgba_pixels(None).collect(), false),
             };
             match d.pos {
                 None => {
-                    self.textures.insert(*id, Tex { w: iw, h: ih, px: pixels });
+                    // the font atlas is drawn 1:1 and patched often: no mips for it
+                    self.textures.insert(*id, Tex::new(iw, ih, pixels, is_image && iw.max(ih) >= 8));
                 }
                 Some([x0, y0]) => {
                     if let Some(t) = self.textures.get_mut(id) {
@@ -86,11 +130,49 @@ impl Renderer {
                                 t.px[dy * t.w + dx] = pixels[row * iw + col];
                             }
                         }
+                        if !t.mips.is_empty() {
+                            t.build_mips();
+                        }
                     }
                 }
             }
         }
+        !set.is_empty()
+    }
 
+    /// Draw the next frame in full (e.g. when taking over from the GPU renderer).
+    pub fn force_redraw(&mut self) {
+        self.force = true;
+        self.prev.clear();
+    }
+
+    pub fn free_textures(&mut self, ids: &[TextureId]) {
+        for id in ids {
+            self.textures.remove(id);
+        }
+    }
+
+    pub fn render(
+        &mut self,
+        window: &Window,
+        bg_color: egui::Rgba,
+        physical_size: PhySize,
+        pixels_per_point: f32,
+        egui_ctx: &mut egui::Context,
+        full_output: &mut FullOutput,
+    ) {
+        let (w, h) = (physical_size.width, physical_size.height);
+        // textures first: egui sends every texture only once, so it must be taken even when the
+        // window is minimised and nothing is drawn
+        let changed = self.apply_textures(&full_output.textures_delta.set) || self.force;
+        if w == 0 || h == 0 {
+            self.free_textures(&full_output.textures_delta.free);
+            full_output.textures_delta.free.clear();
+            self.force = true;
+            return;
+        }
+        let shapes = std::mem::take(&mut full_output.shapes);
+        let delta = &mut full_output.textures_delta;
         let prims = egui_ctx.tessellate(shapes, pixels_per_point);
 
         // Skip all work when nothing changed since the last presented frame.
@@ -271,7 +353,26 @@ fn raster_triangle(
     let c2 = v2.color.to_array();
     let flat_colour = c0 == c1 && c1 == c2;
     let solid_uv = v0.uv == v1.uv && v1.uv == v2.uv;
-    let nearest = (ppp - 1.0).abs() < 1e-4;
+    // texels covered by one screen pixel (constant over the triangle) -> mip level; nearest
+    // sampling only where the texture really lands 1:1 on pixels (text at 100 %)
+    let (tex, nearest) = if solid_uv {
+        (tex, false)
+    } else {
+        let a0_ = (p1y - p2y) * inv_area;
+        let a1_ = (p2y - p0y) * inv_area;
+        let a2_ = -a0_ - a1_;
+        let b0_ = (p2x - p1x) * inv_area;
+        let b1_ = (p0x - p2x) * inv_area;
+        let b2_ = -b0_ - b1_;
+        let (tw, th) = (tex.w as f32, tex.h as f32);
+        let dudx = (a0_ * v0.uv.x + a1_ * v1.uv.x + a2_ * v2.uv.x) * tw;
+        let dvdx = (a0_ * v0.uv.y + a1_ * v1.uv.y + a2_ * v2.uv.y) * th;
+        let dudy = (b0_ * v0.uv.x + b1_ * v1.uv.x + b2_ * v2.uv.x) * tw;
+        let dvdy = (b0_ * v0.uv.y + b1_ * v1.uv.y + b2_ * v2.uv.y) * th;
+        let rho = dudx.hypot(dvdx).max(dudy.hypot(dvdy));
+        let one_to_one = (ppp - 1.0).abs() < 1e-4 && (rho - 1.0).abs() < 0.02;
+        (tex.level(rho), one_to_one)
+    };
     // d(w)/dx per pixel
     let a0 = (p1y - p2y) * inv_area;
     let a1 = (p2y - p0y) * inv_area;
@@ -397,7 +498,7 @@ mod raster_tests {
     fn strip(n: usize, ppp: f32) -> (Vec<u32>, i32, i32) {
         let (w, h) = (300i32, 150i32);
         let mut fb = vec![pack(0, 0, 0); (w * h) as usize];
-        let tex = Tex { w: 1, h: 1, px: vec![Color32::WHITE] };
+        let tex = Tex::new(1, 1, vec![Color32::WHITE], false);
         let col = Color32::from_white_alpha(26);
         let mut verts = Vec::new();
         for i in 0..=n {
@@ -421,7 +522,7 @@ mod raster_tests {
         let (w, h) = (300i32, 200i32);
         for ppp in [1.0f32, 1.25, 1.5, 2.0] {
             let mut fb = vec![pack(0, 0, 0); (w * h) as usize];
-            let tex = Tex { w: 1, h: 1, px: vec![Color32::WHITE] };
+            let tex = Tex::new(1, 1, vec![Color32::WHITE], false);
             let col = Color32::from_white_alpha(26);
             let c = Pos2::new(70.3, 60.7);
             let n = 23;
