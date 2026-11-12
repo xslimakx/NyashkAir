@@ -75,6 +75,13 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                 let f_top = f_hi.min(fs * 0.49);
                 let out_pts = st.spec_out.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
                 draw_spectrum(&painter, g, &out_pts, Color32::from_gray(24), Color32::from_gray(80));
+                // grid stays visible over the spectrum
+                for d in [5.0f32, 10.0, 15.0] {
+                    painter.with_clip_rect(g).hline(g.left()..=g.right(), dy(d), Stroke::new(1.0, Color32::from_white_alpha(7)));
+                }
+                for f in [2000.0f32, 5000.0, 10000.0] {
+                    painter.with_clip_rect(g).vline(fx(f), g.top()..=g.bottom(), Stroke::new(1.0, Color32::from_white_alpha(7)));
+                }
                 let in_pts = st.spec_in.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
                 painter.with_clip_rect(g).add(egui::Shape::line(in_pts, PathStroke::new(1.0, Color32::from_rgb(0x5a, 0x5a, 0x5a))));
                 let (m, h) = (p.mid.value() / 100.0, p.high.value() / 100.0);
