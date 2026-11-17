@@ -1,3 +1,7 @@
+## NyashkAir 1.0.4
+
+- Level scale shows a plain 0 instead of +0.
+
 ## NyashkAir 1.0.3
 
 - **Alt-tab fix (Linux):** after alt-tab, minimising or covering the window, parts of the picture (backgrounds, knobs, images) could stay blank until something on them moved. The window is now drawn again in full whenever the system throws its contents away, and pictures are no longer lost while the window is hidden or a frame is skipped.

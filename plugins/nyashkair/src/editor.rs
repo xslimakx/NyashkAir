@@ -63,7 +63,7 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                 let dy = |d: f32| g.bottom() - g.height() * ((d - d_lo) / (d_hi - d_lo)).clamp(0.0, 1.0);
                 for d in [0.0f32, 5.0, 10.0, 15.0] {
                     painter.hline(g.left()..=g.right(), dy(d), Stroke::new(1.0, if d == 0.0 { MID } else { LINE }));
-                    painter.text(Pos2::new(g.left() - 6.0, dy(d)), Align2::RIGHT_CENTER, format!("{:+.0}", d), mono(9.5), DIM);
+                    painter.text(Pos2::new(g.left() - 6.0, dy(d)), Align2::RIGHT_CENTER, if d.abs() < 0.5 { "0".to_string() } else { format!("{:+.0}", d) }, mono(9.5), DIM);
                 }
                 for f in [1000.0f32, 2000.0, 5000.0, 10000.0, 20000.0] {
                     painter.vline(fx(f), g.top()..=g.bottom(), Stroke::new(1.0, LINE));
