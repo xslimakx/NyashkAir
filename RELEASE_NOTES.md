@@ -1,3 +1,9 @@
+## NyashkAir 1.0.5
+
+- **The sound now matches the curve:** the harmonic paths also passed a phase-shifted copy of the band itself, which bent the real response away from the drawn curve (Mid Air at 50 % even dipped slightly at 8 kHz while the graph showed +4 dB). They now add only the new harmonics; the curve and the sound agree within 1.5 dB at 44.1 / 48 / 96 kHz. Full Mid Air is now +6 dB at 5 kHz, full High Air +10 dB at 14 kHz.
+- The ADDED readout averages over ~300 ms instead of a few samples (steadier).
+- New behaviour tests: each knob lifts its own region steadily, lows stay within 0.5 dB, loud highs get less boost, no audible aliasing from the exciter (worst fold-back -75 dB), trim exact.
+
 ## NyashkAir 1.0.4
 
 - Level scale shows a plain 0 instead of +0.

@@ -8,6 +8,9 @@ pub const MID_LP: f32 = 9000.0;
 pub const MID_HARM_HP: f32 = 4200.0;
 pub const HIGH_HP: f32 = 9000.0; // first order: its real part is never negative, so the boost can't dip
 pub const HIGH_HARM_HP: f32 = 11000.0;
+/// how much of each band is added at a full knob
+pub const MID_AMT: f32 = 1.6;
+pub const HIGH_AMT: f32 = 3.4;
 
 pub struct Coefs {
     pub mid_hp: Coef,
@@ -63,6 +66,7 @@ pub struct Air {
     sm_pow: Smooth,
     added: f32,
     dry: f32,
+    meter_a: f32,
 }
 
 impl Air {
@@ -84,6 +88,8 @@ impl Air {
             sm_pow: Smooth::new(1.0, fs, 8.0),
             added: 0.0,
             dry: 0.0,
+            // the "added" readout averages over ~300 ms (it used to follow every few samples)
+            meter_a: 1.0 - (-1.0 / (0.3 * fs)).exp(),
         }
     }
 
@@ -116,11 +122,13 @@ impl Air {
             let b = st.mid_lp.tick(&c.mid_lp, st.mid_hp.tick(&c.mid_hp, s));
             mid_bp[i] = b;
             // harmonics of the presence band (even + odd), then keep only the new highs
-            let m = self.os_m[i].process(b * 3.0, |v| sat_asym(v, 0.25));
+            // (only what the saturator adds: its linear part would be a second, phase-shifted copy
+            // of the band, which made the real response differ from the curve - even a dip at 8 kHz)
+            let m = self.os_m[i].process(b * 3.0, |v| sat_asym(v, 0.25) - v);
             mid_h[i] = st.mid_hh.tick(&c.mid_h, m) * 0.33;
             let h = st.high_hp.tick(&c.high_hp, s);
             high_hp[i] = h;
-            let hh = self.os_h[i].process(h * 4.0, |v| sat_asym(v, 0.2));
+            let hh = self.os_h[i].process(h * 4.0, |v| sat_asym(v, 0.2) - v);
             high_h[i] = st.high_hh.tick(&c.high_h, hh) * 0.25;
         }
         // shared (linked) dynamics so the stereo image stays put
@@ -136,8 +144,8 @@ impl Air {
         let mut dry_e = 0.0f32;
         let mut out_pk = 0.0f32;
         for i in 0..n {
-            let air_m = (mid_bp[i] * 0.9 + mid_h[i]) * dm * mid * 1.6;
-            let air_h = (high_hp[i] * 0.8 + high_h[i]) * dh * high * 3.4;
+            let air_m = (mid_bp[i] * 0.9 + mid_h[i]) * dm * mid * MID_AMT;
+            let air_h = (high_hp[i] * 0.8 + high_h[i]) * dh * high * HIGH_AMT;
             let air = (air_m + air_h) * pw;
             add_e += air * air;
             dry_e += mid_bp[i] * mid_bp[i] + high_hp[i] * high_hp[i]; // the highs that are already there
@@ -148,8 +156,8 @@ impl Air {
         // meters (slow peak decay is handled by the UI)
         self.in_peak = in_pk;
         self.out_peak = out_pk;
-        self.added = self.added * 0.995 + add_e * 0.005;
-        self.dry = self.dry * 0.995 + dry_e * 0.005;
+        self.added += (add_e - self.added) * self.meter_a;
+        self.dry += (dry_e - self.dry) * self.meter_a;
         self.added_db = if self.dry < 1e-9 { -90.0 } else { 10.0 * ((self.added + 1e-12) / (self.dry + 1e-12)).log10() };
     }
 }
@@ -161,12 +169,10 @@ pub fn curve_db(fs: f32, mid: f32, high: f32, f: f32) -> f32 {
     let (l0r, l0i) = c.mid_lp.response(fs, f);
     let (bre, bim) = (h0r * l0r - h0i * l0i, h0r * l0i + h0i * l0r);
     let (xr, xi) = c.high_hp.response(fs, f);
-    let (mh_r, _mh_i) = c.mid_h.response(fs, f);
-    let mh_mag = (mh_r * mh_r + _mh_i * _mh_i).sqrt();
-    // harmonic contribution is not linear; approximate it in the picture by its share of the band
-    let mr = mid * 1.6 * 0.9;
-    let hrr = high * 3.4 * 0.8;
-    let re = 1.0 + mr * bre + hrr * xr + mid * 0.35 * mh_mag * bre.abs();
+    // (the harmonic paths add only new partials, so the linear response is exactly this)
+    let mr = mid * MID_AMT * 0.9;
+    let hrr = high * HIGH_AMT * 0.8;
+    let re = 1.0 + mr * bre + hrr * xr;
     let im = mr * bim + hrr * xi;
     10.0 * (re * re + im * im).max(1e-9).log10()
 }
