@@ -1,26 +1,34 @@
-//! NyashkAir GUI.
+//! NyashkAir GUI: modern analog faceplate (pre-rendered in tools/render_ui.py, see hw.rs).
 use nih_plug::prelude::*;
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, epaint::PathStroke, Align2, Color32, Pos2, Rect, Stroke, Vec2},
+    egui::{self, epaint::PathStroke, Align2, Color32, FontId, Pos2, Stroke},
 };
 use nyashk_common::analyzer::{draw_spectrum, Spectrum};
-use nyashk_common::ui::*;
+use nyashk_common::ui::{fill_under, resize_grip, set_b, set_norm};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::hw::{self, Hw};
+use crate::hw_layout as lay;
 use crate::{dsp, AirParams, Meters};
 
-const BASE_W: f32 = 640.0;
-const BASE_H: f32 = 430.0;
+const BASE_W: f32 = lay::W;
+const BASE_H: f32 = lay::H;
 
 struct Gui {
+    hw: Option<Hw>,
     spec_in: Spectrum,
     spec_out: Spectrum,
     in_pk: f32,
     out_pk: f32,
-    in_hold: f32,
-    out_hold: f32,
+}
+
+fn k(id: &str) -> &'static hw::KnobL {
+    hw::find(lay::KNOBS, id, |x| x.id)
+}
+fn b(id: &str) -> &'static hw::BtnL {
+    hw::find(lay::BUTTONS, id, |x| x.id)
 }
 
 pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Editor>> {
@@ -28,62 +36,61 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
     let size_state = editor_state.clone();
     create_egui_editor(
         editor_state,
-        Gui { spec_in: Spectrum::new(4096), spec_out: Spectrum::new(4096), in_pk: -90.0, out_pk: -90.0, in_hold: -90.0, out_hold: -90.0 },
-        |ctx, _| apply_theme(ctx),
+        Gui { hw: None, spec_in: Spectrum::new(4096), spec_out: Spectrum::new(4096), in_pk: -90.0, out_pk: -90.0 },
+        |ctx, st| {
+            st.hw = None;
+            let mut v = egui::Visuals::light();
+            v.override_text_color = Some(Color32::from_rgb(30, 34, 40));
+            ctx.set_visuals(v);
+        },
         move |ctx, setter, st| {
             ctx.request_repaint_after(Duration::from_millis(33));
+            if st.hw.is_none() {
+                st.hw = Some(Hw::load(ctx, lay::ASSETS));
+            }
             let p = &*params;
             let fall = |cur: f32, target: f32| if target > cur { target } else { cur - 1.2 };
             st.in_pk = fall(st.in_pk, Meters::get(&meters.in_db));
             st.out_pk = fall(st.out_pk, Meters::get(&meters.out_db));
-            st.in_hold = st.in_hold.max(st.in_pk) - 0.12;
             st.spec_in.update(&meters.tap_in);
             st.spec_out.update(&meters.tap_out);
-            st.out_hold = st.out_hold.max(st.out_pk) - 0.12;
+            let accent = hw::c32(lay::ACCENT);
 
-            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(BG)).show(ctx, |ui| {
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::from_rgb(14, 14, 15))).show(ctx, |ui| {
                 let full = ui.max_rect();
-                let o = full.min;
-                let rect = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(Pos2::new(o.x + x, o.y + y), Vec2::new(w, h));
-                header(ui, o, BASE_W, "Air", "AIR / PRESENCE EXCITER");
+                st.hw.as_mut().unwrap().o = full.min;
+                let hwr = st.hw.as_ref().unwrap();
+                let painter = ui.painter().clone();
+                hwr.background(&painter, BASE_W, BASE_H);
                 let on = p.power.value();
-                if pill_tip(ui, rect(BASE_W - 14.0 - 76.0, 22.0, 76.0, 24.0), "POWER", on, "Switch the effect on or off (smooth, click-free).") {
+                if hw::button(ui, hwr, b("power"), on, "Switch the effect on or off (smooth, click-free).") {
                     set_b(setter, &p.power, !on);
                 }
 
-                // ---- display
-                let dp = rect(14.0, 70.0, BASE_W - 28.0, 168.0);
-                panel(ui, dp);
-                let g = Rect::from_min_max(Pos2::new(dp.left() + 40.0, dp.top() + 14.0), Pos2::new(dp.right() - 170.0, dp.bottom() - 26.0));
-                let painter = ui.painter().clone();
-                painter.rect_filled(g, 4.0, Color32::from_rgb(0x07, 0x07, 0x07));
+                // ---- curve over the live spectrum
+                let scr = hw::find(lay::SCREENS, "curve", |x| x.id);
+                let g = hwr.rect(scr.rect).shrink(6.0);
                 let (f_lo, f_hi) = (1000.0f32, 20000.0f32);
                 let (d_lo, d_hi) = (-3.0f32, 16.0f32);
                 let fx = |f: f32| g.left() + g.width() * (f / f_lo).ln() / (f_hi / f_lo).ln();
                 let dy = |d: f32| g.bottom() - g.height() * ((d - d_lo) / (d_hi - d_lo)).clamp(0.0, 1.0);
+                let grid = Color32::from_rgb(24, 30, 40);
+                let dim = Color32::from_rgb(90, 104, 124);
                 for d in [0.0f32, 5.0, 10.0, 15.0] {
-                    painter.hline(g.left()..=g.right(), dy(d), Stroke::new(1.0, if d == 0.0 { MID } else { LINE }));
-                    painter.text(Pos2::new(g.left() - 6.0, dy(d)), Align2::RIGHT_CENTER, if d.abs() < 0.5 { "0".to_string() } else { format!("{:+.0}", d) }, mono(9.5), DIM);
+                    painter.hline(g.left()..=g.right(), dy(d), Stroke::new(1.0_f32, if d == 0.0 { Color32::from_rgb(44, 54, 70) } else { grid }));
+                    painter.text(Pos2::new(g.left() + 3.0, dy(d) - 6.0), Align2::LEFT_CENTER, if d.abs() < 0.5 { "0".to_string() } else { format!("{:+.0}", d) }, FontId::monospace(8.5), dim);
                 }
-                for f in [1000.0f32, 2000.0, 5000.0, 10000.0, 20000.0] {
-                    painter.vline(fx(f), g.top()..=g.bottom(), Stroke::new(1.0, LINE));
-                    painter.text(Pos2::new(fx(f), g.bottom() + 11.0), Align2::CENTER_CENTER, if f >= 1000.0 { format!("{}k", f / 1000.0) } else { format!("{}", f) }, mono(9.5), DIM);
+                for f in [2000.0f32, 5000.0, 10000.0] {
+                    painter.vline(fx(f), g.top()..=g.bottom(), Stroke::new(1.0_f32, grid));
+                    painter.text(Pos2::new(fx(f) + 3.0, g.bottom() - 7.0), Align2::LEFT_CENTER, format!("{}k", f / 1000.0), FontId::monospace(8.5), dim);
                 }
-                // live spectrum: input as a thin line, output filled (the difference is the added air)
                 let fs = f32::from_bits(meters.fs.load(std::sync::atomic::Ordering::Relaxed)).clamp(8000.0, 384000.0);
                 let sy = |d: f32| g.bottom() - g.height() * ((d + 84.0) / 84.0).clamp(-0.05, 1.05);
                 let f_top = f_hi.min(fs * 0.49);
                 let out_pts = st.spec_out.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
-                draw_spectrum(&painter, g, &out_pts, Color32::from_gray(24), Color32::from_gray(80));
-                // grid stays visible over the spectrum
-                for d in [5.0f32, 10.0, 15.0] {
-                    painter.with_clip_rect(g).hline(g.left()..=g.right(), dy(d), Stroke::new(1.0, Color32::from_white_alpha(7)));
-                }
-                for f in [2000.0f32, 5000.0, 10000.0] {
-                    painter.with_clip_rect(g).vline(fx(f), g.top()..=g.bottom(), Stroke::new(1.0, Color32::from_white_alpha(7)));
-                }
+                draw_spectrum(&painter, g, &out_pts, Color32::from_rgb(20, 28, 42), Color32::from_rgb(64, 82, 110));
                 let in_pts = st.spec_in.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
-                painter.with_clip_rect(g).add(egui::Shape::line(in_pts, PathStroke::new(1.0, Color32::from_rgb(0x5a, 0x5a, 0x5a))));
+                painter.with_clip_rect(g).add(egui::Shape::line(in_pts, PathStroke::new(1.0_f32, Color32::from_rgb(70, 76, 86))));
                 let (m, h) = (p.mid.value() / 100.0, p.high.value() / 100.0);
                 let pts: Vec<Pos2> = (0..=160)
                     .map(|i| {
@@ -92,44 +99,31 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                         Pos2::new(fx(f), dy(d))
                     })
                     .collect();
-                fill_under(&painter.with_clip_rect(g), &pts, dy(0.0), Color32::from_white_alpha(12));
-                painter.with_clip_rect(g).add(egui::Shape::line(pts, PathStroke::new(2.0, WHITE)));
-                painter.text(Pos2::new(g.left() + 8.0, g.top() + 10.0), Align2::LEFT_CENTER, "AIR CURVE  ·  SPECTRUM IN / OUT", mono(9.5), DIM);
+                fill_under(&painter.with_clip_rect(g), &pts, dy(0.0), Color32::from_rgba_unmultiplied(60, 160, 255, 40));
+                painter.with_clip_rect(g).add(egui::Shape::line(pts, PathStroke::new(2.0_f32, accent)));
+                hw::glass(&painter, hwr, scr);
 
-                // meters
-                let mx = dp.right() - 150.0;
-                let bar_t = dp.top() + 18.0;
-                let bar_h = dp.height() - 52.0;
-                for (k, (name, lvl, hold)) in [("IN", st.in_pk, st.in_hold), ("OUT", st.out_pk, st.out_hold)].into_iter().enumerate() {
-                    let r = Rect::from_min_size(Pos2::new(mx + 38.0 * k as f32, bar_t), Vec2::new(14.0, bar_h));
-                    vbar(ui, r, lvl, hold, -48.0, 0.0);
-                    painter.text(Pos2::new(r.center().x, r.bottom() + 11.0), Align2::CENTER_CENTER, name, mono(9.5), DIM);
-                }
+                let lv = |d: f32| ((d + 48.0) / 48.0).clamp(0.0, 1.0);
+                hw::ladder(&painter, hwr, hw::find(lay::LADDERS, "in", |x| x.id), lv(st.in_pk), false);
+                hw::ladder(&painter, hwr, hw::find(lay::LADDERS, "out", |x| x.id), lv(st.out_pk), false);
                 let added = Meters::get(&meters.added_db);
-                painter.text(Pos2::new(dp.right() - 22.0, bar_t + 8.0), Align2::RIGHT_CENTER, "ADDED", mono(9.0), DIM);
-                painter.text(Pos2::new(dp.right() - 22.0, bar_t + 44.0), Align2::RIGHT_CENTER, "vs existing", mono(9.0), DIM);
-                painter.text(Pos2::new(dp.right() - 22.0, bar_t + 56.0), Align2::RIGHT_CENTER, "highs", mono(9.0), DIM);
-                painter.text(Pos2::new(dp.right() - 22.0, bar_t + 26.0), Align2::RIGHT_CENTER, if on && added > -60.0 { format!("{:+.1} dB", added) } else { "-- dB".into() }, mono(11.0), WHITE);
+                hw::text(&painter, hwr, hw::find(lay::TEXTS, "added", |x| x.id), &if on && added > -60.0 { format!("{:+.1} dB", added) } else { "-- dB".into() });
 
                 // ---- knobs
-                let kp = rect(14.0, 250.0, BASE_W - 28.0, 166.0);
-                panel(ui, kp);
                 let link = p.link.value();
-                let cell = |cx: f32| Rect::from_min_size(Pos2::new(o.x + cx - 90.0, kp.top() + 6.0), Vec2::new(180.0, 150.0));
-                let a = knob_r(ui, setter, &p.mid, "MID AIR", cell(135.0), "Presence: 2 to 8 kHz. Adds a gentle lift plus fresh harmonics, reduced automatically on loud passages.", false, 46.0);
-                let b = knob_r(ui, setter, &p.high, "HIGH AIR", cell(390.0), "Brilliance above 8 kHz. Adds a silky lift plus new high harmonics (like opening a window on the top end).", false, 46.0);
+                let a = hw::knob(ui, hwr, setter, &p.mid, k("mid"), accent, "MID AIR: presence, 2 to 8 kHz. A gentle lift plus fresh harmonics, reduced automatically on loud passages.");
+                let bb = hw::knob(ui, hwr, setter, &p.high, k("high"), accent, "HIGH AIR: brilliance above 8 kHz. A silky lift plus new high harmonics.");
                 if link {
-                    if a.delta != 0.0 {
-                        set_norm(setter, &p.high, p.high.unmodulated_normalized_value() + a.delta);
-                    } else if b.delta != 0.0 {
-                        set_norm(setter, &p.mid, p.mid.unmodulated_normalized_value() + b.delta);
+                    if a != 0.0 {
+                        set_norm(setter, &p.high, p.high.unmodulated_normalized_value() + a);
+                    } else if bb != 0.0 {
+                        set_norm(setter, &p.mid, p.mid.unmodulated_normalized_value() + bb);
                     }
                 }
-                if pill_tip(ui, Rect::from_center_size(Pos2::new(o.x + (135.0 + 390.0) / 2.0, kp.top() + 54.0), Vec2::new(46.0, 26.0)), "LINK", link, "Link the two knobs: moving one moves the other by the same amount.") {
+                if hw::button(ui, hwr, b("link"), link, "LINK: moving one knob moves the other by the same amount.") {
                     set_b(setter, &p.link, !link);
                 }
-                knob_r(ui, setter, &p.trim, "TRIM", Rect::from_min_size(Pos2::new(o.x + BASE_W - 14.0 - 110.0, kp.top() + 28.0), Vec2::new(100.0, 120.0)), "Output trim in dB.", true, 26.0);
-
+                hw::knob(ui, hwr, setter, &p.trim, k("trim"), accent, "TRIM: output trim in dB.");
                 resize_grip(ui, ctx, &size_state, full, BASE_W, BASE_H, 480.0);
             });
         },
