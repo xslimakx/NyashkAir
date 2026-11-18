@@ -19,8 +19,8 @@ pub const KNOBS: &[KnobL] = &[
     KnobL { id: "trim", c: (555.00, 318.00), r: 28.00, ptr0: 7.06, ptr1: 19.29, ptr_w: 1.96, ptr_col: [30,30,32,235], engraved: true, skirt: (0.00, 0.00), led_r: 28.00, led_n: 17, bip: true },
 ];
 pub const BUTTONS: &[BtnL] = &[
-    BtnL { id: "power", rect: (538.00, 21.00, 64.00, 22.00), tex: "btn_power", tex_size: (88.00, 46.00) },
-    BtnL { id: "link", rect: (228.00, 307.00, 54.00, 22.00), tex: "btn_link", tex_size: (78.00, 46.00) },
+    BtnL { id: "power", rect: (538.00, 21.00, 64.00, 22.00), tex: "btn_power", tex_size: (64.00, 22.00), glow: [60,160,255] },
+    BtnL { id: "link", rect: (228.00, 307.00, 54.00, 22.00), tex: "btn_link", tex_size: (54.00, 22.00), glow: [60,160,255] },
 ];
 pub const SCREENS: &[ScreenL] = &[
     ScreenL { id: "curve", rect: (36.00, 74.00, 430.00, 140.00), glass: "glass_curve" },
