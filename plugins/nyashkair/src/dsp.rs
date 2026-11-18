@@ -104,6 +104,12 @@ impl Air {
 
     /// Process one stereo (or mono: n = 1) frame in place.
     pub fn process(&mut self, p: &Params, x: &mut [f32; 2], n: usize) {
+        // a NaN / inf from the host would stay in the filter memories for good: treat it as silence
+        for v in x.iter_mut() {
+            if !v.is_finite() {
+                *v = 0.0;
+            }
+        }
         let mid = self.sm_mid.tick(p.mid);
         let high = self.sm_high.tick(p.high);
         let pw = self.sm_pow.tick(if p.power { 1.0 } else { 0.0 });

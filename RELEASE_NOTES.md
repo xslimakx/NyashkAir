@@ -1,3 +1,8 @@
+## NyashkAir 1.0.6
+
+- Оверсемплінг гармонік без втрат на верху і з меншим аліасингом (новий поліфазний half-band фільтр).
+- Захист від NaN / inf від хоста: один «битий» семпл більше не ламає плагін назавжди (раніше фільтри залишались у NaN і звук пропадав до перезапуску).
+
 ## NyashkAir 1.0.5
 
 - **The sound now matches the curve:** the harmonic paths also passed a phase-shifted copy of the band itself, which bent the real response away from the drawn curve (Mid Air at 50 % even dipped slightly at 8 kHz while the graph showed +4 dB). They now add only the new harmonics; the curve and the sound agree within 1.5 dB at 44.1 / 48 / 96 kHz. Full Mid Air is now +6 dB at 5 kHz, full High Air +10 dB at 14 kHz.
