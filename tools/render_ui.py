@@ -9,10 +9,10 @@ p = Panel(640, 430, (0.80, 0.81, 0.82), ACC, (30, 34, 40, 240), (80, 88, 98, 230
 header(p, 'AIR', 'PRESENCE & AIR EXCITER', x0=36)
 p.button('power', 570, 32, 64, 22, 'POWER')
 p.screen('curve', 36, 74, 430, 140)
-p.text('AIR CURVE  ·  SPECTRUM IN / OUT', 251, 226, 6.5, None, True, sp=1)
+p.text('AIR CURVE  ·  SPECTRUM IN / OUT', 251, 226, 7.2, None, True, sp=1)
 lad = [(0.0, ACC), (0.75, (255, 190, 50)), (0.9, (255, 70, 60))]
 p.ladder('in', 486, 74, 16, 140, 22, lad); p.ladder('out', 514, 74, 16, 140, 22, lad)
-p.text('IN', 494, 226, 6.5, None, True); p.text('OUT', 522, 226, 6.5, None, True)
+p.text('IN', 494, 226, 7.2, None, True); p.text('OUT', 522, 226, 7.2, None, True)
 p.text('ADDED', 578, 84, 7, None, True, sp=1)
 p.readout('added', 578, 104, size=12, col=(20, 24, 30, 255))
 p.text('vs existing', 578, 124, 6.5); p.text('highs', 578, 135, 6.5)
