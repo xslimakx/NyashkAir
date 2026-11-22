@@ -90,7 +90,7 @@ pub fn create(params: Arc<AirParams>, meters: Arc<Meters>) -> Option<Box<dyn Edi
                 let out_pts = st.spec_out.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
                 draw_spectrum(&painter, g, &out_pts, Color32::from_rgb(20, 28, 42), Color32::from_rgb(64, 82, 110));
                 let in_pts = st.spec_in.points(fs, f_lo, f_top, 140, 4.5, fx, sy);
-                painter.with_clip_rect(g).add(egui::Shape::line(in_pts, PathStroke::new(1.0_f32, Color32::from_rgb(70, 76, 86))));
+                painter.with_clip_rect(g).add(egui::Shape::line(nyashk_common::analyzer::smooth_line(&in_pts, 3), PathStroke::new(1.0_f32, Color32::from_rgb(70, 76, 86))));
                 let (m, h) = (p.mid.value() / 100.0, p.high.value() / 100.0);
                 let pts: Vec<Pos2> = (0..=160)
                     .map(|i| {
